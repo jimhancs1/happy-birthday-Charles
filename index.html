@@ -142,209 +142,12 @@
     </div>
 
     <script>
-        // Global variables
         let canvas, ctx, player, entityManager, keys = {}, lastTime = 0;
         let score = 0, currentStage = 1, currentWave = 1, gameRunning = true;
         let dialogueActive = false;
         let audioContext, doubleShot = 0;
         let powerUps = [];
         let boss = null;
-
-        class EntityManager {
-            constructor() { this.entities = []; }
-            add(e) { 
-                if (e && typeof e === 'object') this.entities.push(e); 
-            }
-            update(dt) {
-                for (let i = this.entities.length - 1; i >= 0; i--) {
-                    const e = this.entities[i];
-                    if (e && e.update) {
-                        try { e.update(dt); } catch (err) { console.error("Update error", err); }
-                    }
-                }
-                this.entities = this.entities.filter(e => e && e.active !== false);
-            }
-            draw(ctx) { 
-                for (let e of this.entities) {
-                    if (e && e.draw) {
-                        try { e.draw(ctx); } catch (err) { console.error("Draw error", err); }
-                    }
-                }
-            }
-            clear() { this.entities = []; }
-        }
-
-        class Projectile {
-            constructor(x, y, tx, ty, speed = 580) {
-                this.x = x || 0; 
-                this.y = y || 0; 
-                this.radius = 7; 
-                this.speed = speed; 
-                this.active = true;
-                const d = Math.hypot((tx || 0) - this.x, (ty || 0) - this.y) || 1;
-                this.vx = ((tx || 0) - this.x) / d * this.speed;
-                this.vy = ((ty || 0) - this.y) / d * this.speed;
-            }
-            update(dt) {
-                this.x += this.vx * dt;
-                this.y += this.vy * dt;
-                if (this.x < -100 || this.x > 1400 || this.y < -100 || this.y > 800) {
-                    this.active = false;
-                }
-            }
-            draw(ctx) {
-                if (!this.active) return;
-                ctx.fillStyle = '#00ffcc';
-                ctx.shadowBlur = 25;
-                ctx.shadowColor = '#00ffcc';
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        class PowerUp {
-            constructor(x, y, type) {
-                this.x = x; this.y = y; this.type = type; 
-                this.radius = 15; this.active = true; this.pulse = 0;
-            }
-            update(dt) { this.pulse += dt * 7; }
-            draw(ctx) {
-                const sz = this.radius + Math.sin(this.pulse) * 4;
-                const c = {health: '#00ff88', damage: '#ff3366', speed: '#ffff00', multi: '#aa00ff'}[this.type] || '#ffffff';
-                ctx.shadowBlur = 35; ctx.shadowColor = c; ctx.fillStyle = c;
-                ctx.beginPath(); ctx.arc(this.x, this.y, sz, 0, Math.PI * 2); ctx.fill();
-                ctx.fillStyle = '#000'; ctx.font = 'bold 18px Courier New'; ctx.textAlign = 'center';
-                ctx.fillText(this.type[0].toUpperCase(), this.x, this.y + 6);
-            }
-        }
-
-        class Player {
-            constructor() {
-                this.x = 180; this.y = 360; this.radius = 19; 
-                this.speed = 290; this.health = 100; this.damage = 28; 
-                this.shootCooldown = 0; this.invulnerable = 0;
-            }
-            update(dt) {
-                let dx = 0, dy = 0;
-                if (keys['ArrowLeft'] || keys['a']) dx--;
-                if (keys['ArrowRight'] || keys['d']) dx++;
-                if (keys['ArrowUp'] || keys['w']) dy--;
-                if (keys['ArrowDown'] || keys['s']) dy++;
-                if (dx || dy) {
-                    const l = Math.hypot(dx, dy) || 1;
-                    this.x += (dx / l) * this.speed * dt;
-                    this.y += (dy / l) * this.speed * dt;
-                }
-                this.x = Math.max(30, Math.min(1250, this.x));
-                this.y = Math.max(30, Math.min(690, this.y));
-                if (this.shootCooldown > 0) this.shootCooldown -= dt;
-                if (this.invulnerable > 0) this.invulnerable -= dt;
-            }
-            draw(ctx) {
-                let drawColor = '#00f2ff', shadowColor = '#00f2ff', shadowSize = 30;
-                if (this.invulnerable > 0) {
-                    const flash = Math.floor(this.invulnerable * 14) % 2;
-                    drawColor = flash === 0 ? '#ffff00' : '#00ffcc';
-                    shadowColor = drawColor; shadowSize = 48;
-                }
-                ctx.shadowBlur = shadowSize; 
-                ctx.shadowColor = shadowColor; 
-                ctx.fillStyle = drawColor;
-                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
-            }
-            shoot(tx, ty) {
-                if (this.shootCooldown > 0 || !gameRunning) return;
-                const count = doubleShot > 0 ? 2 : 1;
-                for (let i = 0; i < count; i++) {
-                    const offset = i * 12 - 6;
-                    entityManager.add(new Projectile(this.x, this.y - 10, tx + offset, ty));
-                }
-                this.shootCooldown = 0.15;
-            }
-        }
-
-        class AdvancedEnemy {
-            constructor(x, y, type = 'normal') {
-                this.x = x !== undefined ? x : 600 + Math.random() * 500;
-                this.y = y !== undefined ? y : 200 + Math.random() * 300;
-                this.type = type;
-                this.radius = 20;
-                this.health = 38 + currentStage * 9 + currentWave * 5;
-                this.baseSpeed = 52 + currentWave * 8;
-                this.speed = this.baseSpeed;
-                this.active = true;
-                this.color = type === 'green' ? '#00ff88' : type === 'red' ? '#ff3366' : '#ffaa00';
-                this.angle = 0;
-                this.aiTimer = 0;
-                this.aiState = 'approach';
-            }
-
-            update(dt) {
-                this.aiTimer += dt;
-                if (!player) return;
-                const dx = player.x - this.x;
-                const dy = player.y - this.y;
-                const dist = Math.hypot(dx, dy) || 1;
-
-                this.x += (dx / dist) * this.speed * dt;
-                this.y += (dy / dist) * this.speed * dt;
-
-                this.angle = Math.atan2(dy, dx);
-            }
-
-            draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.angle);
-                ctx.shadowBlur = 28; 
-                ctx.shadowColor = this.color;
-                ctx.fillStyle = this.color;
-                ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
-                ctx.restore();
-            }
-        }
-
-        class Boss {
-            constructor() { 
-                this.x = 1050; this.y = 360; this.radius = 52; 
-                this.health = 1450; this.maxHealth = 1450; 
-                this.active = true; this.phase = 0; this.attackTimer = 0;
-            }
-            update(dt) { 
-                this.y = 260 + Math.sin(Date.now() / 280) * 180; 
-                this.attackTimer += dt;
-                if (this.attackTimer > 1.2) {
-                    this.attackTimer = 0;
-                    this.fireAttack();
-                }
-            }
-            fireAttack() {
-                if (!player) return;
-                for (let i = -3; i <= 3; i++) {
-                    entityManager.add(new Projectile(this.x, this.y, player.x + i*30, player.y + i*20, 420));
-                }
-            }
-            draw(ctx) {
-                ctx.shadowBlur = 70; ctx.shadowColor = '#ff0044'; ctx.fillStyle = '#ff0044';
-                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
-            }
-        }
-
-        function playSound(pitch = 1) {
-            try {
-                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const o = audioContext.createOscillator();
-                const g = audioContext.createGain();
-                o.type = 'sawtooth';
-                o.frequency.value = 140 + Math.random() * 120 * pitch;
-                g.gain.value = 0.08;
-                g.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
-                o.connect(g).connect(audioContext.destination);
-                o.start();
-                o.stop(audioContext.currentTime + 0.1);
-            } catch(e) {}
-        }
 
         function showDialogue(text, portrait = "⚡", callback = null) {
             dialogueActive = true;
@@ -368,6 +171,132 @@
             }, text.length * 38 + 900);
         }
 
+        class EntityManager {
+            constructor() { this.entities = []; }
+            add(e) { if (e) this.entities.push(e); }
+            update(dt) {
+                for (let i = this.entities.length - 1; i >= 0; i--) {
+                    const e = this.entities[i];
+                    if (e && e.update) e.update(dt);
+                }
+                this.entities = this.entities.filter(e => e && e.active !== false);
+            }
+            draw(ctx) { 
+                for (let e of this.entities) {
+                    if (e && e.draw) e.draw(ctx);
+                }
+            }
+            clear() { this.entities = []; }
+        }
+
+        class Projectile {
+            constructor(x, y, tx, ty, speed = 580) {
+                this.x = x || 0;
+                this.y = y || 0;
+                this.radius = 7;
+                this.speed = speed;
+                this.active = true;
+                const d = Math.hypot((tx || 600) - this.x, (ty || 360) - this.y) || 1;
+                this.vx = ((tx || 600) - this.x) / d * this.speed;
+                this.vy = ((ty || 360) - this.y) / d * this.speed;
+            }
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                if (this.x < -50 || this.x > 1350 || this.y < -50 || this.y > 770) this.active = false;
+            }
+            draw(ctx) {
+                ctx.fillStyle = '#00ffcc';
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#00ffcc';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.x = 180; this.y = 360; this.radius = 19;
+                this.speed = 290; this.health = 100; this.damage = 28;
+                this.shootCooldown = 0; this.invulnerable = 0;
+            }
+            update(dt) {
+                let dx = 0, dy = 0;
+                if (keys['ArrowLeft'] || keys['a']) dx--;
+                if (keys['ArrowRight'] || keys['d']) dx++;
+                if (keys['ArrowUp'] || keys['w']) dy--;
+                if (keys['ArrowDown'] || keys['s']) dy++;
+                if (dx || dy) {
+                    const l = Math.hypot(dx, dy) || 1;
+                    this.x += (dx / l) * this.speed * dt;
+                    this.y += (dy / l) * this.speed * dt;
+                }
+                this.x = Math.max(30, Math.min(1250, this.x));
+                this.y = Math.max(30, Math.min(690, this.y));
+                if (this.shootCooldown > 0) this.shootCooldown -= dt;
+            }
+            draw(ctx) {
+                let drawColor = '#00f2ff';
+                ctx.shadowBlur = 30; ctx.shadowColor = drawColor; ctx.fillStyle = drawColor;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+            }
+            shoot(tx, ty) {
+                if (this.shootCooldown > 0 || !gameRunning) return;
+                const count = doubleShot > 0 ? 2 : 1;
+                for (let i = 0; i < count; i++) {
+                    entityManager.add(new Projectile(this.x, this.y - 10, tx, ty));
+                }
+                this.shootCooldown = 0.12;
+            }
+        }
+
+        class AdvancedEnemy {
+            constructor() {
+                this.x = 700 + Math.random() * 400;
+                this.y = 150 + Math.random() * 400;
+                this.radius = 20;
+                this.health = 45 + currentStage * 8;
+                this.speed = 65 + currentWave * 6;
+                this.active = true;
+                this.color = '#ffaa00';
+                this.angle = 0;
+            }
+            update(dt) {
+                if (!player) return;
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                const dist = Math.hypot(dx, dy) || 1;
+                this.x += (dx / dist) * this.speed * dt;
+                this.y += (dy / dist) * this.speed * dt;
+                this.angle = Math.atan2(dy, dx);
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.shadowBlur = 25; ctx.shadowColor = this.color;
+                ctx.fillStyle = this.color;
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Boss {
+            constructor() {
+                this.x = 1050; this.y = 360; this.radius = 52;
+                this.health = 1400; this.active = true;
+            }
+            update(dt) {
+                this.y = 260 + Math.sin(Date.now()/300) * 160;
+            }
+            draw(ctx) {
+                ctx.shadowBlur = 60; ctx.shadowColor = '#ff0044';
+                ctx.fillStyle = '#ff0044';
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+
         function spawnWave() {
             entityManager.clear();
             powerUps = [];
@@ -378,30 +307,15 @@
                 return;
             }
 
-            const count = Math.min(12, currentWave * 2 + 4);
+            const count = Math.min(12, 6 + currentWave * 2);
             for (let i = 0; i < count; i++) {
                 entityManager.add(new AdvancedEnemy());
             }
         }
 
-        function collectPowerUp(pu) {
-            playSound(2.8);
-            switch (pu.type) {
-                case 'health': player.health = Math.min(160, player.health + 38); break;
-                case 'damage': player.damage += 12; setTimeout(() => player.damage = Math.max(28, player.damage - 12), 8000); break;
-                case 'speed': 
-                    const old = player.speed; 
-                    player.speed = 420; 
-                    setTimeout(() => player.speed = old, 7000); 
-                    break;
-                case 'multi': doubleShot = 6; break;
-            }
-            document.getElementById('health-value').textContent = Math.floor(player.health);
-        }
-
         function gameLoop(ts) {
             if (!lastTime) lastTime = ts;
-            const dt = Math.min((ts - lastTime) / 1000, 0.1);
+            const dt = Math.min((ts - lastTime)/1000, 0.1);
             lastTime = ts;
 
             if (!gameRunning || dialogueActive || !player) {
@@ -409,89 +323,15 @@
                 return;
             }
 
-            try {
-                player.update(dt);
-                entityManager.update(dt);
-                powerUps = powerUps.filter(p => {
-                    if (p) p.update(dt);
-                    return p && p.active;
-                });
+            player.update(dt);
+            entityManager.update(dt);
 
-                if (boss && boss.active) boss.update(dt);
-
-                // Powerup collection
-                for (let i = powerUps.length - 1; i >= 0; i--) {
-                    const pu = powerUps[i];
-                    if (pu && Math.hypot(player.x - pu.x, player.y - pu.y) < 45) {
-                        collectPowerUp(pu);
-                        powerUps.splice(i, 1);
-                    }
-                }
-
-                // Simple collision system
-                const projectiles = entityManager.entities.filter(e => e instanceof Projectile && e.active);
-                const enemies = entityManager.entities.filter(e => e instanceof AdvancedEnemy);
-
-                // Projectiles hit enemies
-                for (let p of projectiles) {
-                    for (let e of enemies) {
-                        if (e.health > 0 && Math.hypot(p.x - e.x, p.y - e.y) < 28) {
-                            e.health -= player.damage;
-                            p.active = false;
-                            if (e.health <= 0) {
-                                score += 140;
-                                document.getElementById('score-value').textContent = score;
-                                if (e.type === 'green') player.health = Math.min(160, player.health + 25);
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                // Boss
-                if (boss && boss.active) {
-                    if (Math.hypot(player.x - boss.x, player.y - boss.y) < 70) {
-                        player.health -= 40;
-                        document.getElementById('health-value').textContent = Math.floor(player.health);
-                    }
-                    for (let p of projectiles) {
-                        if (p.active && Math.hypot(p.x - boss.x, p.y - boss.y) < 60) {
-                            boss.health -= player.damage * 0.6;
-                            p.active = false;
-                            if (boss.health <= 0) {
-                                boss.active = false;
-                                setTimeout(() => {
-                                    document.getElementById('victory-screen').classList.remove('hidden');
-                                    document.getElementById('victory-text').innerHTML = `FINAL SCORE: ${score}<br><br>THE GRID IS RESTORED!`;
-                                    gameRunning = false;
-                                }, 800);
-                            }
-                        }
-                    }
-                }
-
-                entityManager.entities = entityManager.entities.filter(e => e && e.active !== false);
-                if (doubleShot > 0) doubleShot -= dt;
-
-                if (player.health <= 0) {
-                    gameRunning = false;
-                    const go = document.getElementById('game-over');
-                    go.classList.remove('hidden');
-                    document.getElementById('final-score').textContent = `FINAL SCORE: ${score}`;
-                }
-
-                // Draw
-                ctx.fillStyle = '#0a0f1a';
-                ctx.fillRect(0, 0, 1280, 720);
-
-                player.draw(ctx);
-                entityManager.draw(ctx);
-                powerUps.forEach(p => p && p.draw(ctx));
-                if (boss && boss.active) boss.draw(ctx);
-
-            } catch (err) {
-                console.error("Game error:", err);
-            }
+            // Draw
+            ctx.fillStyle = '#0a0f1a';
+            ctx.fillRect(0, 0, 1280, 720);
+            player.draw(ctx);
+            entityManager.draw(ctx);
+            if (boss) boss.draw(ctx);
 
             requestAnimationFrame(gameLoop);
         }
@@ -499,44 +339,43 @@
         function startGame() {
             document.getElementById('boot-sequence').style.display = 'none';
             document.getElementById('game-ui').style.display = 'block';
-            
+
             canvas = document.getElementById('canvas');
             ctx = canvas.getContext('2d');
-            
+
             player = new Player();
             entityManager = new EntityManager();
 
             window.addEventListener('keydown', e => keys[e.key] = true);
             window.addEventListener('keyup', e => delete keys[e.key]);
-            
+
             canvas.addEventListener('click', e => {
-                if (dialogueActive || !gameRunning || !player) return;
-                const r = canvas.getBoundingClientRect();
-                player.shoot(e.clientX - r.left, e.clientY - r.top);
+                if (!dialogueActive && gameRunning && player) {
+                    const r = canvas.getBoundingClientRect();
+                    player.shoot(e.clientX - r.left, e.clientY - r.top);
+                }
             });
 
             setTimeout(() => {
                 showDialogue("The Nexus Grid has been corrupted by Blackout.", "🛠️", () => {
-                    showDialogue("Advanced enemy AI online.", "⚡", () => {
-                        showDialogue("Stage 1 starting...", "🔋", () => {
-                            spawnWave();
-                            requestAnimationFrame(gameLoop);
-                        });
+                    showDialogue("Stage 1 starting...", "🔋", () => {
+                        spawnWave();
+                        requestAnimationFrame(gameLoop);
                     });
                 });
-            }, 400);
+            }, 500);
         }
 
         window.onload = () => {
             let p = 0;
             const bar = document.getElementById('progress-bar');
             const int = setInterval(() => {
-                p += 2.2;
+                p += 2;
                 if (p > 100) p = 100;
                 bar.style.width = p + '%';
                 if (p >= 100) {
                     clearInterval(int);
-                    setTimeout(startGame, 400);
+                    setTimeout(startGame, 300);
                 }
             }, 160);
         };
