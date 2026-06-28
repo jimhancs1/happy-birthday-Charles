@@ -3,43 +3,407 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Circuit Defender | Birthday Protocol</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Birthday Protocol | Nexus Grid Defender</title>
+    <style>
+        :root { --neon-blue: #00f2ff; --bg-dark: #0a0e14; }
+        body { background: var(--bg-dark); color: white; font-family: 'Courier New', monospace; margin: 0; overflow: hidden; }
+        
+        #boot-sequence { position: fixed; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 1000; }
+        #progress-container { width: 60%; height: 30px; background: #111; border: 2px solid var(--neon-blue); margin-top: 30px; overflow: hidden; }
+        #progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00f2ff, #7df9ff); transition: width 0.2s linear; }
+
+        #game-ui { display: none; }
+        canvas { display: block; background: #0a0f1a; }
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; text-shadow: 0 0 8px #00f2ff; pointer-events: none; }
+        .hidden { display: none !important; }
+
+        #dialogue-box {
+            position: absolute; bottom: 12%; left: 50%; transform: translateX(-50%);
+            width: 75%; padding: 28px 35px; background: rgba(0,15,35,0.96);
+            border: 3px solid #00f2ff; border-radius: 8px; box-shadow: 0 0 40px #00f2ff; z-index: 50;
+        }
+        #victory-screen, #game-over {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 100; background: rgba(5,7,20,0.98); border: 4px solid #00f2ff; padding: 30px; min-width: 520px; text-align: center;
+        }
+    </style>
 </head>
 <body>
+
+    <!-- BOOT -->
+    <div id="boot-sequence">
+        <div id="boot-text">NEXUS GRID BOOT SEQUENCE INITIATED...</div>
+        <div id="progress-container"><div id="progress-bar"></div></div>
+        <p style="margin-top:15px;">Birthday Protocol v1.337</p>
+    </div>
+
+    <!-- GAME -->
     <div id="game-ui">
         <canvas id="canvas" width="1280" height="720"></canvas>
         
         <div id="hud">
-            <div id="health-bar">HEALTH: <span id="health-value">100</span></div>
-            <div id="xp-bar">XP: <span id="xp-value">0</span></div>
-            <h2 id="stage-display">Stage 1: Power Station</h2>
-            <div id="wave-display">Wave <span id="wave-value">1</span></div>
+            <div>HEALTH: <span id="health-value">100</span></div>
+            <div>SCORE: <span id="score-value">0</span></div>
+            <div>STAGE <span id="stage-value">1</span> | WAVE <span id="wave-value">1</span></div>
         </div>
 
         <div id="dialogue-box" class="hidden">
-            <div id="dialogue-portrait"></div>
+            <div id="dialogue-portrait" style="font-size:48px;float:left;margin-right:20px;"></div>
             <p id="dialogue-text"></p>
-            <div id="dialogue-continue">→ PRESS ANY KEY OR CLICK TO CONTINUE</div>
+            <div style="text-align:right;margin-top:15px;color:#00ff9d;">→ CLICK OR PRESS ANY KEY TO CONTINUE</div>
         </div>
 
-        <div id="upgrade-menu" class="hidden">
-            <h2>CHOOSE UPGRADE</h2>
-            <div id="upgrade-options"></div>
+        <div id="victory-screen" class="hidden">
+            <h1 style="color:#00ff88;">MISSION ACCOMPLISHED</h1>
+            <p id="victory-text"></p>
+            <button onclick="location.reload()">PLAY AGAIN</button>
         </div>
 
         <div id="game-over" class="hidden">
-            <div class="game-over-content">
-                <h1>GAME OVER</h1>
-                <p id="final-score">Final Score: 0</p>
-                <p id="final-wave">Wave Reached: 1</p>
-                <button id="retry-btn">RETRY MISSION</button>
-                <button id="menu-btn">MAIN MENU</button>
-            </div>
+            <h1 style="color:#ff3366;">GRID FAILURE</h1>
+            <p id="final-score"></p>
+            <p id="final-wave"></p>
+            <button onclick="location.reload()">RESTART MISSION</button>
         </div>
     </div>
 
-    <script src="engine.js"></script>
-    <script src="game.js"></script>
+    <script>
+        let canvas, ctx, player, entityManager, keys = {}, lastTime = 0;
+        let score = 0, currentStage = 1, currentWave = 1, gameRunning = true;
+        let dialogueActive = false;
+        let audioContext, particles = [], doubleShot = 0;
+        let powerUps = [];
+        let boss = null;
+
+        class EntityManager {
+            constructor() { this.entities = []; }
+            add(e) { this.entities.push(e); }
+            update(dt) {
+                for (let i = this.entities.length-1; i >= 0; i--) if (this.entities[i].update) this.entities[i].update(dt);
+                this.entities = this.entities.filter(e => e.active !== false);
+            }
+            draw(ctx) { this.entities.forEach(e => e.draw && e.draw(ctx)); }
+            clear() { this.entities = []; }
+        }
+
+        class Particle {
+            constructor(x,y,color,size=6){this.x=x;this.y=y;this.vx=Math.random()*400-200;this.vy=Math.random()*400-200;
+                this.life=1;this.color=color;this.size=size;this.active=true;}
+            update(dt){this.x+=this.vx*dt;this.y+=this.vy*dt;this.life-=dt*3.2;if(this.life<=0)this.active=false;}
+            draw(ctx){ctx.globalAlpha=this.life;ctx.fillStyle=this.color;ctx.fillRect(this.x,this.y,this.size,this.size);}
+        }
+
+        class Projectile {
+            constructor(x,y,tx,ty,speed=580){this.x=x;this.y=y;this.radius=7;this.speed=speed;this.active=true;
+                const d=Math.hypot(tx-x,ty-y)||1;this.vx=(tx-x)/d*this.speed;this.vy=(ty-y)/d*this.speed;}
+            update(dt){this.x+=this.vx*dt;this.y+=this.vy*dt;}
+            draw(ctx){ctx.fillStyle='#00ffcc';ctx.shadowBlur=25;ctx.shadowColor='#00ffcc';
+                ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
+        }
+
+        class PowerUp {
+            constructor(x,y,type){this.x=x;this.y=y;this.type=type;this.radius=15;this.active=true;this.pulse=0;}
+            update(dt){this.pulse+=dt*7;}
+            draw(ctx){
+                const sz=this.radius+Math.sin(this.pulse)*4;
+                const c={health:'#00ff88',damage:'#ff3366',speed:'#ffff00',multi:'#aa00ff'}[this.type];
+                ctx.shadowBlur=35;ctx.shadowColor=c;ctx.fillStyle=c;
+                ctx.beginPath();ctx.arc(this.x,this.y,sz,0,Math.PI*2);ctx.fill();
+                ctx.fillStyle='#000';ctx.font='bold 18px Courier New';ctx.textAlign='center';
+                ctx.fillText(this.type[0].toUpperCase(),this.x,this.y+6);
+            }
+        }
+
+        class Player {
+            constructor(){
+                this.x=180; this.y=360; this.radius=19;
+                this.speed=290; this.health=100; this.damage=28;
+                this.shootCooldown=0;
+                this.invulnerable = 0;
+                this.flashTimer = 0;
+            }
+            update(dt){
+                let dx=0,dy=0;
+                if(keys['ArrowLeft']||keys['a'])dx--; if(keys['ArrowRight']||keys['d'])dx++;
+                if(keys['ArrowUp']||keys['w'])dy--; if(keys['ArrowDown']||keys['s'])dy++;
+                if(dx||dy){const l=Math.hypot(dx,dy);this.x+=(dx/l)*this.speed*dt;this.y+=(dy/l)*this.speed*dt;}
+                this.x=Math.max(30,Math.min(1250,this.x)); this.y=Math.max(30,Math.min(690,this.y));
+                if(this.shootCooldown>0)this.shootCooldown-=dt;
+                if(this.invulnerable>0)this.invulnerable-=dt;
+                if(this.flashTimer>0)this.flashTimer-=dt;
+            }
+            draw(ctx){
+                let drawColor = '#00f2ff';
+                let shadowColor = '#00f2ff';
+                let shadowSize = 30;
+
+                if (this.invulnerable > 0) {
+                    // Flash effect: alternate between yellow and cyan rapidly
+                    const flashPhase = Math.floor(this.invulnerable * 12) % 2;
+                    if (flashPhase === 0) {
+                        drawColor = '#ffff00';
+                        shadowColor = '#ffff00';
+                        shadowSize = 45;
+                    } else {
+                        drawColor = '#00ffcc';
+                        shadowColor = '#00ffcc';
+                    }
+                }
+
+                ctx.shadowBlur = shadowSize;
+                ctx.shadowColor = shadowColor;
+                ctx.fillStyle = drawColor;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+                ctx.fill();
+
+                // Extra flash ring when just hit
+                if (this.invulnerable > 0.6) {
+                    ctx.globalAlpha = 0.5;
+                    ctx.strokeStyle = '#ffff00';
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius + 12 + Math.sin(this.invulnerable*15)*3, 0, Math.PI*2);
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+            }
+            shoot(tx,ty){
+                if(this.shootCooldown>0)return;
+                const count=doubleShot>0?2:1;
+                for(let i=0;i<count;i++){
+                    const p=new Projectile(this.x,this.y-10,tx+(i*12-6),ty);
+                    entityManager.add(p);
+                }
+                this.shootCooldown=0.15;
+            }
+        }
+
+        class Boss { /* ... same as previous version ... */
+            constructor() {
+                this.x = 1050; this.y = 360;
+                this.radius = 52;
+                this.health = 1450; this.maxHealth = 1450;
+                this.active = true;
+                this.phase = 0;
+                this.attackTimer = 0;
+                this.telegraph = 0;
+                this.isTelegraphing = false;
+                this.currentPattern = 0;
+            }
+
+            update(dt) {
+                this.y = 260 + Math.sin(Date.now()/280) * 180;
+                this.attackTimer += dt;
+
+                if (this.health < this.maxHealth * 0.65 && this.phase === 0) this.phase = 1;
+                if (this.health < this.maxHealth * 0.28 && this.phase === 1) this.phase = 2;
+
+                const baseRate = this.phase === 2 ? 0.55 : this.phase === 1 ? 0.75 : 1.1;
+
+                if (this.isTelegraphing) {
+                    this.telegraph -= dt;
+                    if (this.telegraph <= 0) {
+                        this.fireAttack();
+                        this.isTelegraphing = false;
+                    }
+                } else if (this.attackTimer > baseRate) {
+                    this.attackTimer = 0;
+                    this.startTelegraph();
+                }
+            }
+
+            startTelegraph() {
+                this.isTelegraphing = true;
+                this.telegraph = 0.65;
+                playSound(0.6);
+            }
+
+            fireAttack() {
+                playSound(1.8);
+                switch(this.currentPattern) {
+                    case 0: // Spread
+                        for (let i = -4; i <= 4; i++) {
+                            const proj = new Projectile(this.x, this.y, player.x + i*38, player.y + i*25, 450);
+                            entityManager.add(proj);
+                        }
+                        break;
+                    case 1: // Tracking
+                        for (let i = 0; i < 6; i++) {
+                            const proj = new Projectile(this.x, this.y, player.x, player.y, 390 + i*18);
+                            entityManager.add(proj);
+                        }
+                        break;
+                    case 2: // Burst
+                        for (let i = 0; i < 9; i++) {
+                            setTimeout(() => {
+                                if (boss && boss.active) entityManager.add(new Projectile(this.x, this.y, player.x, player.y, 510));
+                            }, i*55);
+                        }
+                        break;
+                }
+                this.currentPattern = (this.currentPattern + 1) % 3;
+            }
+
+            draw(ctx) {
+                if (this.isTelegraphing) {
+                    ctx.globalAlpha = 0.4 + Math.sin(Date.now()/60)*0.3;
+                    ctx.strokeStyle = '#ffff00';
+                    ctx.lineWidth = 8;
+                    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 28, 0, Math.PI*2); ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+
+                ctx.shadowBlur = 70; ctx.shadowColor = '#ff0044';
+                ctx.fillStyle = '#ff0044';
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
+
+                ctx.shadowBlur = 40; ctx.shadowColor = '#ffff00';
+                ctx.fillStyle = '#ffff00';
+                ctx.beginPath(); ctx.arc(this.x, this.y, 22, 0, Math.PI*2); ctx.fill();
+
+                // Health Bar
+                const ratio = Math.max(0, this.health / this.maxHealth);
+                const bw = 190;
+                ctx.fillStyle = '#111'; ctx.fillRect(this.x - bw/2, this.y - this.radius - 42, bw, 20);
+                ctx.fillStyle = ratio > 0.4 ? '#00ff88' : '#ff3366';
+                ctx.fillRect(this.x - bw/2, this.y - this.radius - 42, bw * ratio, 20);
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+                ctx.strokeRect(this.x - bw/2, this.y - this.radius - 42, bw, 20);
+
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Courier New'; ctx.textAlign = 'center';
+                ctx.fillText(`BLACKOUT CORE ${Math.ceil(ratio*100)}%`, this.x, this.y - this.radius - 50);
+            }
+        }
+
+        function playSound(pitch=1){if(!audioContext)audioContext=new(window.AudioContext||window.webkitAudioContext)();
+            const o=audioContext.createOscillator(),g=audioContext.createGain();
+            o.type='sawtooth';o.frequency.value=140+Math.random()*120*pitch;
+            g.gain.value=0.1;g.gain.exponentialRampToValueAtTime(0.001,audioContext.currentTime+0.12);
+            o.connect(g).connect(audioContext.destination);o.start();o.stop(audioContext.currentTime+0.13);
+        }
+
+        function showDialogue(text, portrait="⚡", callback=null){
+            dialogueActive=true; document.getElementById('dialogue-box').classList.remove('hidden');
+            document.getElementById('dialogue-portrait').textContent=portrait;
+            document.getElementById('dialogue-text').textContent="";
+            let i=0; const type=()=>{if(i<text.length){document.getElementById('dialogue-text').textContent+=text[i++];setTimeout(type,32);}};
+            type();
+            setTimeout(()=>{dialogueActive=false;document.getElementById('dialogue-box').classList.add('hidden');if(callback)callback();}, text.length*38+900);
+        }
+
+        function spawnWave() {
+            entityManager.clear(); powerUps=[]; boss=null;
+            if (currentStage===5 && currentWave===5) { boss = new Boss(); showDialogue("BLACKOUT CORE REACTOR ONLINE.\nFINAL BOSS ENGAGED.", "☢️"); return; }
+            const count = Math.min(14, currentWave*2 + 4);
+            for(let i=0;i<count;i++){
+                let t=Math.random()<0.3?'green':Math.random()<0.3?'red':'normal';
+                entityManager.add(new Enemy(null,null,t));
+            }
+            if(Math.random()<0.7){
+                const types=['health','damage','speed','multi'];
+                powerUps.push(new PowerUp(400+Math.random()*500,180+Math.random()*360,types[Math.floor(Math.random()*4)]));
+            }
+        }
+
+        function collectPowerUp(pu){
+            playSound(2.8);
+            for(let k=0;k<20;k++)particles.push(new Particle(pu.x,pu.y,'#ffff00'));
+            switch(pu.type){
+                case'health':player.health=Math.min(160,player.health+38);break;
+                case'damage':player.damage+=15;setTimeout(()=>player.damage-=15,9000);break;
+                case'speed':const os=player.speed;player.speed*=1.5;setTimeout(()=>player.speed=os,8000);break;
+                case'multi':doubleShot=7;break;
+            }
+            document.getElementById('health-value').textContent=Math.floor(player.health);
+        }
+
+        function gameLoop(ts){
+            if(!lastTime)lastTime=ts;
+            const dt=Math.min((ts-lastTime)/1000,0.1);lastTime=ts;
+            if(!gameRunning||dialogueActive)return requestAnimationFrame(gameLoop);
+
+            player.update(dt);
+            entityManager.update(dt);
+            powerUps.forEach(p=>p.update(dt));
+            if(boss)boss.update(dt);
+
+            powerUps = powerUps.filter(pu => {
+                if(Math.hypot(player.x-pu.x,player.y-pu.y)<player.radius+pu.radius){collectPowerUp(pu);return false;}
+                return true;
+            });
+
+            if(boss){
+                const dist = Math.hypot(player.x-boss.x, player.y-boss.y);
+                if(dist < player.radius + boss.radius + 12 && player.invulnerable <= 0){
+                    player.health -= 45;
+                    player.invulnerable = 1.35;   // Slightly longer dodge window
+                    player.flashTimer = 1.35;
+                    document.getElementById('health-value').textContent = Math.floor(player.health);
+                    for(let k=0;k<35;k++) particles.push(new Particle(player.x, player.y, '#ff3366', 9));
+                }
+
+                for(let i=entityManager.entities.length-1;i>=0;i--){
+                    const p=entityManager.entities[i];
+                    if(p instanceof Projectile && Math.hypot(p.x-boss.x,p.y-boss.y)<boss.radius+12){
+                        boss.health -= player.damage * 0.75;
+                        p.active=false;
+                        for(let k=0;k<18;k++) particles.push(new Particle(boss.x+Math.random()*40-20, boss.y+Math.random()*40-20, '#ffff00', 5));
+                        if(boss.health<=0){
+                            boss.active=false;
+                            for(let k=0;k<130;k++) particles.push(new Particle(boss.x,boss.y,'#ff0044',8));
+                            setTimeout(()=>{document.getElementById('victory-screen').classList.remove('hidden');
+                                document.getElementById('victory-text').innerHTML=`FINAL SCORE: ${score}<br><br>THE GRID IS RESTORED!<br>Happy Birthday!`;
+                            },1400);
+                        }
+                    }
+                }
+            }
+
+            entityManager.entities = entityManager.entities.filter(e => e.active !== false);
+            if(doubleShot>0)doubleShot-=dt;
+            if(player.health<=0){gameRunning=false;document.getElementById('game-over').classList.remove('hidden');}
+
+            // Render
+            ctx.fillStyle='#0a0f1a';ctx.fillRect(0,0,1280,720);
+            player.draw(ctx);
+            entityManager.draw(ctx);
+            powerUps.forEach(p=>p.draw(ctx));
+            if(boss)boss.draw(ctx);
+            particles=particles.filter(p=>{p.update(dt);p.draw(ctx);return p.active;});
+
+            if(boss && !boss.active){} 
+            else if(!boss && entityManager.entities.filter(e=>e instanceof Enemy).length===0){
+                currentWave++; document.getElementById('wave-value').textContent=currentWave;
+                if(currentWave>5){currentStage++;currentWave=1;document.getElementById('stage-value').textContent=currentStage;if(currentStage<=5)spawnWave();}
+                else spawnWave();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startGame(){
+            document.getElementById('boot-sequence').style.display='none';
+            document.getElementById('game-ui').style.display='block';
+            canvas=document.getElementById('canvas');ctx=canvas.getContext('2d');
+            player=new Player(); entityManager=new EntityManager();
+
+            window.addEventListener('keydown',e=>keys[e.key]=true);
+            window.addEventListener('keyup',e=>keys[e.key]=false);
+            canvas.addEventListener('click',e=>{if(!dialogueActive&&gameRunning){
+                const r=canvas.getBoundingClientRect();player.shoot(e.clientX-r.left,e.clientY-r.top);
+            }});
+
+            setTimeout(()=>{showDialogue("The Nexus Grid has been corrupted by Blackout.","🛠️",()=>{
+                showDialogue("Dodge the glowing attacks!","⚡",()=>{showDialogue("Stage 1 starting...","🔋",()=>{spawnWave();requestAnimationFrame(gameLoop);});});
+            });},600);
+        };
+
+        window.onload = () => {
+            let p=0; const bar=document.getElementById('progress-bar');
+            const int=setInterval(()=>{p+=Math.random()*13+7;if(p>100)p=100;bar.style.width=p+'%';
+                if(p>=100){clearInterval(int);setTimeout(startGame,400);}},92);
+        };
+    </script>
 </body>
 </html>
