@@ -1,0 +1,6 @@
+body { margin: 0; background: #05070a; color: #00f2ff; font-family: 'Courier New', monospace; overflow: hidden; }
+#gameCanvas { display: block; }
+#boot-screen { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #05070a; z-index: 10; }
+.progress-container { width: 300px; height: 10px; border: 1px solid #00f2ff; }
+#progress { width: 0%; height: 100%; background: #00f2ff; transition: width 0.1s; }
+#ui { position: absolute; top: 20px; left: 20px; font-size: 1.5rem; text-shadow: 0 0 10px #00f2ff; pointer-events: none; }
