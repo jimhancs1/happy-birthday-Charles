@@ -142,6 +142,7 @@
     </div>
 
     <script>
+        // Global variables
         let canvas, ctx, player, entityManager, keys = {}, lastTime = 0;
         let score = 0, currentStage = 1, currentWave = 1, gameRunning = true;
         let dialogueActive = false;
@@ -150,50 +151,49 @@
         let boss = null;
 
         class EntityManager {
-            constructor() { 
-                this.entities = []; 
-            }
+            constructor() { this.entities = []; }
             add(e) { 
-                if (e) this.entities.push(e); 
+                if (e && typeof e === 'object') this.entities.push(e); 
             }
             update(dt) {
                 for (let i = this.entities.length - 1; i >= 0; i--) {
                     const e = this.entities[i];
-                    if (e && e.update) e.update(dt);
+                    if (e && e.update) {
+                        try { e.update(dt); } catch (err) { console.error("Update error", err); }
+                    }
                 }
                 this.entities = this.entities.filter(e => e && e.active !== false);
             }
             draw(ctx) { 
                 for (let e of this.entities) {
-                    if (e && e.draw) e.draw(ctx);
+                    if (e && e.draw) {
+                        try { e.draw(ctx); } catch (err) { console.error("Draw error", err); }
+                    }
                 }
             }
             clear() { this.entities = []; }
-            getProjectiles() {
-                return this.entities.filter(e => e instanceof Projectile);
-            }
         }
 
         class Projectile {
             constructor(x, y, tx, ty, speed = 580) {
-                this.x = x; 
-                this.y = y; 
+                this.x = x || 0; 
+                this.y = y || 0; 
                 this.radius = 7; 
                 this.speed = speed; 
                 this.active = true;
-                const d = Math.hypot(tx - x, ty - y) || 1;
-                this.vx = (tx - x) / d * this.speed;
-                this.vy = (ty - y) / d * this.speed;
+                const d = Math.hypot((tx || 0) - this.x, (ty || 0) - this.y) || 1;
+                this.vx = ((tx || 0) - this.x) / d * this.speed;
+                this.vy = ((ty || 0) - this.y) / d * this.speed;
             }
             update(dt) {
                 this.x += this.vx * dt;
                 this.y += this.vy * dt;
-                // Offscreen cleanup
-                if (this.x < -50 || this.x > 1330 || this.y < -50 || this.y > 770) {
+                if (this.x < -100 || this.x > 1400 || this.y < -100 || this.y > 800) {
                     this.active = false;
                 }
             }
             draw(ctx) {
+                if (!this.active) return;
                 ctx.fillStyle = '#00ffcc';
                 ctx.shadowBlur = 25;
                 ctx.shadowColor = '#00ffcc';
@@ -205,42 +205,25 @@
 
         class PowerUp {
             constructor(x, y, type) {
-                this.x = x; 
-                this.y = y; 
-                this.type = type; 
-                this.radius = 15; 
-                this.active = true; 
-                this.pulse = 0;
+                this.x = x; this.y = y; this.type = type; 
+                this.radius = 15; this.active = true; this.pulse = 0;
             }
-            update(dt) {
-                this.pulse += dt * 7;
-            }
+            update(dt) { this.pulse += dt * 7; }
             draw(ctx) {
                 const sz = this.radius + Math.sin(this.pulse) * 4;
-                const c = {health: '#00ff88', damage: '#ff3366', speed: '#ffff00', multi: '#aa00ff'}[this.type];
-                ctx.shadowBlur = 35; 
-                ctx.shadowColor = c; 
-                ctx.fillStyle = c;
-                ctx.beginPath(); 
-                ctx.arc(this.x, this.y, sz, 0, Math.PI * 2); 
-                ctx.fill();
-                ctx.fillStyle = '#000'; 
-                ctx.font = 'bold 18px Courier New'; 
-                ctx.textAlign = 'center';
+                const c = {health: '#00ff88', damage: '#ff3366', speed: '#ffff00', multi: '#aa00ff'}[this.type] || '#ffffff';
+                ctx.shadowBlur = 35; ctx.shadowColor = c; ctx.fillStyle = c;
+                ctx.beginPath(); ctx.arc(this.x, this.y, sz, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#000'; ctx.font = 'bold 18px Courier New'; ctx.textAlign = 'center';
                 ctx.fillText(this.type[0].toUpperCase(), this.x, this.y + 6);
             }
         }
 
         class Player {
             constructor() {
-                this.x = 180; 
-                this.y = 360; 
-                this.radius = 19; 
-                this.speed = 290; 
-                this.health = 100; 
-                this.damage = 28; 
-                this.shootCooldown = 0; 
-                this.invulnerable = 0;
+                this.x = 180; this.y = 360; this.radius = 19; 
+                this.speed = 290; this.health = 100; this.damage = 28; 
+                this.shootCooldown = 0; this.invulnerable = 0;
             }
             update(dt) {
                 let dx = 0, dy = 0;
@@ -263,31 +246,19 @@
                 if (this.invulnerable > 0) {
                     const flash = Math.floor(this.invulnerable * 14) % 2;
                     drawColor = flash === 0 ? '#ffff00' : '#00ffcc';
-                    shadowColor = drawColor; 
-                    shadowSize = 48;
+                    shadowColor = drawColor; shadowSize = 48;
                 }
                 ctx.shadowBlur = shadowSize; 
                 ctx.shadowColor = shadowColor; 
                 ctx.fillStyle = drawColor;
-                ctx.beginPath(); 
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); 
-                ctx.fill();
-
-                if (this.invulnerable > 0.5) {
-                    ctx.globalAlpha = 0.6; 
-                    ctx.strokeStyle = '#ffff00'; 
-                    ctx.lineWidth = 5;
-                    ctx.beginPath(); 
-                    ctx.arc(this.x, this.y, this.radius + 14 + Math.sin(this.invulnerable * 18) * 4, 0, Math.PI * 2); 
-                    ctx.stroke();
-                    ctx.globalAlpha = 1;
-                }
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
             }
             shoot(tx, ty) {
                 if (this.shootCooldown > 0 || !gameRunning) return;
                 const count = doubleShot > 0 ? 2 : 1;
                 for (let i = 0; i < count; i++) {
-                    entityManager.add(new Projectile(this.x, this.y - 10, tx + (i * 12 - 6), ty));
+                    const offset = i * 12 - 6;
+                    entityManager.add(new Projectile(this.x, this.y - 10, tx + offset, ty));
                 }
                 this.shootCooldown = 0.15;
             }
@@ -295,8 +266,8 @@
 
         class AdvancedEnemy {
             constructor(x, y, type = 'normal') {
-                this.x = x !== undefined ? x : Math.random() * 800 + 400;
-                this.y = y !== undefined ? y : Math.random() * 400 + 150;
+                this.x = x !== undefined ? x : 600 + Math.random() * 500;
+                this.y = y !== undefined ? y : 200 + Math.random() * 300;
                 this.type = type;
                 this.radius = 20;
                 this.health = 38 + currentStage * 9 + currentWave * 5;
@@ -307,56 +278,17 @@
                 this.angle = 0;
                 this.aiTimer = 0;
                 this.aiState = 'approach';
-                this.orbitRadius = 120 + Math.random() * 80;
-                this.evadeCooldown = 0;
-                this.orbitOffset = Math.random() * Math.PI * 2;
             }
 
             update(dt) {
                 this.aiTimer += dt;
-                this.evadeCooldown = Math.max(0, this.evadeCooldown - dt);
-
                 if (!player) return;
                 const dx = player.x - this.x;
                 const dy = player.y - this.y;
                 const dist = Math.hypot(dx, dy) || 1;
 
-                switch (this.aiState) {
-                    case 'approach':
-                        this.x += (dx / dist) * this.speed * dt;
-                        this.y += (dy / dist) * this.speed * dt;
-                        if (dist < 220 && Math.random() < 0.035) {
-                            this.aiState = Math.random() < 0.5 ? 'flank' : 'orbit';
-                        }
-                        break;
-                    case 'flank':
-                        const flankAngle = Math.atan2(dy, dx) + (Math.PI / 2) * (this.type === 'red' ? 1 : -1);
-                        this.x += Math.cos(flankAngle) * this.speed * 0.95 * dt;
-                        this.y += Math.sin(flankAngle) * this.speed * 0.95 * dt;
-                        if (this.aiTimer > 2.8) this.aiState = 'approach';
-                        break;
-                    case 'orbit':
-                        const orbitAngle = Date.now() / 700 + this.orbitOffset;
-                        const targetX = player.x + Math.cos(orbitAngle) * this.orbitRadius;
-                        const targetY = player.y + Math.sin(orbitAngle) * this.orbitRadius * 0.7;
-                        const odx = targetX - this.x;
-                        const ody = targetY - this.y;
-                        const odist = Math.hypot(odx, ody) || 1;
-                        this.x += (odx / odist) * this.speed * 0.85 * dt;
-                        this.y += (ody / odist) * this.speed * 0.85 * dt;
-                        if (dist > 380) this.aiState = 'approach';
-                        break;
-                }
-
-                if (this.evadeCooldown <= 0) {
-                    for (let proj of entityManager.getProjectiles()) {
-                        if (Math.hypot(proj.x - this.x, proj.y - this.y) < 160) {
-                            this.aiState = 'evade';
-                            this.evadeCooldown = 1.1;
-                            break;
-                        }
-                    }
-                }
+                this.x += (dx / dist) * this.speed * dt;
+                this.y += (dy / dist) * this.speed * dt;
 
                 this.angle = Math.atan2(dy, dx);
             }
@@ -368,111 +300,34 @@
                 ctx.shadowBlur = 28; 
                 ctx.shadowColor = this.color;
                 ctx.fillStyle = this.color;
-                ctx.beginPath(); 
-                ctx.arc(0, 0, this.radius, 0, Math.PI * 2); 
-                ctx.fill();
-                ctx.fillStyle = '#112233'; 
-                ctx.beginPath(); 
-                ctx.arc(8, 0, 7, 0, Math.PI * 2); 
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
                 ctx.restore();
             }
         }
 
-        class Boss { /* ... same as before ... */
+        class Boss {
             constructor() { 
-                this.x = 1050; 
-                this.y = 360; 
-                this.radius = 52; 
-                this.health = 1450; 
-                this.maxHealth = 1450; 
-                this.active = true; 
-                this.phase = 0; 
-                this.attackTimer = 0; 
-                this.telegraph = 0; 
-                this.isTelegraphing = false; 
-                this.currentPattern = 0; 
+                this.x = 1050; this.y = 360; this.radius = 52; 
+                this.health = 1450; this.maxHealth = 1450; 
+                this.active = true; this.phase = 0; this.attackTimer = 0;
             }
             update(dt) { 
                 this.y = 260 + Math.sin(Date.now() / 280) * 180; 
                 this.attackTimer += dt;
-                if (this.health < this.maxHealth * 0.65 && this.phase === 0) this.phase = 1;
-                if (this.health < this.maxHealth * 0.28 && this.phase === 1) this.phase = 2;
-                const baseRate = this.phase === 2 ? 0.52 : this.phase === 1 ? 0.72 : 1.05;
-                if (this.isTelegraphing) { 
-                    this.telegraph -= dt; 
-                    if (this.telegraph <= 0) { 
-                        this.fireAttack(); 
-                        this.isTelegraphing = false; 
-                    } 
+                if (this.attackTimer > 1.2) {
+                    this.attackTimer = 0;
+                    this.fireAttack();
                 }
-                else if (this.attackTimer > baseRate) { 
-                    this.attackTimer = 0; 
-                    this.startTelegraph(); 
-                }
-            }
-            startTelegraph() {
-                this.isTelegraphing = true;
-                this.telegraph = 0.65;
-                playSound(0.6);
             }
             fireAttack() {
-                playSound(1.8);
-                switch (this.currentPattern) {
-                    case 0:
-                        for (let i = -4; i <= 4; i++) entityManager.add(new Projectile(this.x, this.y, player.x + i * 38, player.y + i * 25, 450));
-                        break;
-                    case 1:
-                        for (let i = 0; i < 6; i++) entityManager.add(new Projectile(this.x, this.y, player.x, player.y, 390 + i * 18));
-                        break;
-                    case 2:
-                        for (let i = 0; i < 9; i++) {
-                            setTimeout(() => {
-                                if (boss && boss.active) entityManager.add(new Projectile(this.x, this.y, player.x, player.y, 510));
-                            }, i * 55);
-                        }
-                        break;
+                if (!player) return;
+                for (let i = -3; i <= 3; i++) {
+                    entityManager.add(new Projectile(this.x, this.y, player.x + i*30, player.y + i*20, 420));
                 }
-                this.currentPattern = (this.currentPattern + 1) % 3;
             }
             draw(ctx) {
-                if (this.isTelegraphing) {
-                    ctx.globalAlpha = 0.4 + Math.sin(Date.now() / 60) * 0.3;
-                    ctx.strokeStyle = '#ffff00'; 
-                    ctx.lineWidth = 8;
-                    ctx.beginPath(); 
-                    ctx.arc(this.x, this.y, this.radius + 28, 0, Math.PI * 2); 
-                    ctx.stroke();
-                    ctx.globalAlpha = 1;
-                }
-                ctx.shadowBlur = 70; 
-                ctx.shadowColor = '#ff0044'; 
-                ctx.fillStyle = '#ff0044'; 
-                ctx.beginPath(); 
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); 
-                ctx.fill();
-                
-                ctx.shadowBlur = 40; 
-                ctx.shadowColor = '#ffff00'; 
-                ctx.fillStyle = '#ffff00'; 
-                ctx.beginPath(); 
-                ctx.arc(this.x, this.y, 22, 0, Math.PI * 2); 
-                ctx.fill();
-
-                const ratio = Math.max(0, this.health / this.maxHealth); 
-                const bw = 190;
-                ctx.fillStyle = '#111'; 
-                ctx.fillRect(this.x - bw / 2, this.y - this.radius - 42, bw, 20);
-                ctx.fillStyle = ratio > 0.4 ? '#00ff88' : '#ff3366'; 
-                ctx.fillRect(this.x - bw / 2, this.y - this.radius - 42, bw * ratio, 20);
-                ctx.strokeStyle = '#fff'; 
-                ctx.lineWidth = 3; 
-                ctx.strokeRect(this.x - bw / 2, this.y - this.radius - 42, bw, 20);
-                
-                ctx.fillStyle = '#fff'; 
-                ctx.font = 'bold 15px Courier New'; 
-                ctx.textAlign = 'center';
-                ctx.fillText(`BLACKOUT CORE ${Math.ceil(ratio * 100)}%`, this.x, this.y - this.radius - 50);
+                ctx.shadowBlur = 70; ctx.shadowColor = '#ff0044'; ctx.fillStyle = '#ff0044';
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
             }
         }
 
@@ -483,11 +338,11 @@
                 const g = audioContext.createGain();
                 o.type = 'sawtooth';
                 o.frequency.value = 140 + Math.random() * 120 * pitch;
-                g.gain.value = 0.1;
-                g.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.12);
+                g.gain.value = 0.08;
+                g.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
                 o.connect(g).connect(audioContext.destination);
                 o.start();
-                o.stop(audioContext.currentTime + 0.13);
+                o.stop(audioContext.currentTime + 0.1);
             } catch(e) {}
         }
 
@@ -520,40 +375,26 @@
 
             if (currentStage === 5 && currentWave === 5) {
                 boss = new Boss();
-                showDialogue("BLACKOUT CORE REACTOR ONLINE.\nFINAL BOSS ENGAGED.", "☢️");
                 return;
             }
 
-            const count = Math.min(16, currentWave * 2 + 5);
+            const count = Math.min(12, currentWave * 2 + 4);
             for (let i = 0; i < count; i++) {
-                const type = Math.random() < 0.35 ? 'green' : Math.random() < 0.35 ? 'red' : 'normal';
-                entityManager.add(new AdvancedEnemy(null, null, type));
-            }
-
-            if (Math.random() < 0.78) {
-                const types = ['health', 'damage', 'speed', 'multi'];
-                powerUps.push(new PowerUp(380 + Math.random() * 520, 160 + Math.random() * 380, types[Math.floor(Math.random() * 4)]));
+                entityManager.add(new AdvancedEnemy());
             }
         }
 
         function collectPowerUp(pu) {
             playSound(2.8);
             switch (pu.type) {
-                case 'health':
-                    player.health = Math.min(160, player.health + 38);
+                case 'health': player.health = Math.min(160, player.health + 38); break;
+                case 'damage': player.damage += 12; setTimeout(() => player.damage = Math.max(28, player.damage - 12), 8000); break;
+                case 'speed': 
+                    const old = player.speed; 
+                    player.speed = 420; 
+                    setTimeout(() => player.speed = old, 7000); 
                     break;
-                case 'damage':
-                    player.damage += 15;
-                    setTimeout(() => { if (player) player.damage -= 15; }, 9000);
-                    break;
-                case 'speed':
-                    const os = player.speed;
-                    player.speed *= 1.5;
-                    setTimeout(() => { if (player) player.speed = os; }, 8000);
-                    break;
-                case 'multi':
-                    doubleShot = 7.5;
-                    break;
+                case 'multi': doubleShot = 6; break;
             }
             document.getElementById('health-value').textContent = Math.floor(player.health);
         }
@@ -563,7 +404,7 @@
             const dt = Math.min((ts - lastTime) / 1000, 0.1);
             lastTime = ts;
 
-            if (!gameRunning || dialogueActive) {
+            if (!gameRunning || dialogueActive || !player) {
                 requestAnimationFrame(gameLoop);
                 return;
             }
@@ -571,75 +412,72 @@
             try {
                 player.update(dt);
                 entityManager.update(dt);
-                powerUps.forEach(p => p && p.update(dt));
-                if (boss && boss.active) boss.update(dt);
-
-                // POWER-UP COLLECTION
-                powerUps = powerUps.filter(pu => {
-                    if (pu && Math.hypot(player.x - pu.x, player.y - pu.y) < player.radius + pu.radius) {
-                        collectPowerUp(pu);
-                        return false;
-                    }
-                    return true;
+                powerUps = powerUps.filter(p => {
+                    if (p) p.update(dt);
+                    return p && p.active;
                 });
 
-                // Optimized Collisions
-                const projectiles = entityManager.getProjectiles();
+                if (boss && boss.active) boss.update(dt);
+
+                // Powerup collection
+                for (let i = powerUps.length - 1; i >= 0; i--) {
+                    const pu = powerUps[i];
+                    if (pu && Math.hypot(player.x - pu.x, player.y - pu.y) < 45) {
+                        collectPowerUp(pu);
+                        powerUps.splice(i, 1);
+                    }
+                }
+
+                // Simple collision system
+                const projectiles = entityManager.entities.filter(e => e instanceof Projectile && e.active);
                 const enemies = entityManager.entities.filter(e => e instanceof AdvancedEnemy);
 
-                // Projectiles vs Enemies
-                for (let e of enemies) {
-                    if (!e || e.health <= 0) continue;
-                    for (let p of projectiles) {
-                        if (!p || !p.active) continue;
-                        if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) {
+                // Projectiles hit enemies
+                for (let p of projectiles) {
+                    for (let e of enemies) {
+                        if (e.health > 0 && Math.hypot(p.x - e.x, p.y - e.y) < 28) {
                             e.health -= player.damage;
                             p.active = false;
-
                             if (e.health <= 0) {
-                                if (e.type === 'green') player.health = Math.min(160, player.health + 25);
-                                if (e.type === 'red') doubleShot = Math.max(doubleShot, 4.5);
                                 score += 140;
                                 document.getElementById('score-value').textContent = score;
+                                if (e.type === 'green') player.health = Math.min(160, player.health + 25);
                             }
+                            break;
                         }
                     }
                 }
 
-                // Boss collisions
+                // Boss
                 if (boss && boss.active) {
-                    const dist = Math.hypot(player.x - boss.x, player.y - boss.y);
-                    if (dist < player.radius + boss.radius + 12 && player.invulnerable <= 0) {
-                        player.health -= 45;
-                        player.invulnerable = 1.35;
+                    if (Math.hypot(player.x - boss.x, player.y - boss.y) < 70) {
+                        player.health -= 40;
                         document.getElementById('health-value').textContent = Math.floor(player.health);
                     }
-
                     for (let p of projectiles) {
-                        if (p && p.active && Math.hypot(p.x - boss.x, p.y - boss.y) < boss.radius + 12) {
-                            boss.health -= player.damage * 0.75;
+                        if (p.active && Math.hypot(p.x - boss.x, p.y - boss.y) < 60) {
+                            boss.health -= player.damage * 0.6;
                             p.active = false;
                             if (boss.health <= 0) {
                                 boss.active = false;
                                 setTimeout(() => {
                                     document.getElementById('victory-screen').classList.remove('hidden');
-                                    document.getElementById('victory-text').innerHTML = `FINAL SCORE: ${score}<br><br>THE GRID IS RESTORED!<br>Happy Birthday Charles!`;
+                                    document.getElementById('victory-text').innerHTML = `FINAL SCORE: ${score}<br><br>THE GRID IS RESTORED!`;
                                     gameRunning = false;
-                                }, 1400);
+                                }, 800);
                             }
                         }
                     }
                 }
 
-                // Cleanup
                 entityManager.entities = entityManager.entities.filter(e => e && e.active !== false);
                 if (doubleShot > 0) doubleShot -= dt;
 
                 if (player.health <= 0) {
                     gameRunning = false;
-                    document.getElementById('game-over').classList.remove('hidden');
+                    const go = document.getElementById('game-over');
+                    go.classList.remove('hidden');
                     document.getElementById('final-score').textContent = `FINAL SCORE: ${score}`;
-                    document.getElementById('final-wave').textContent = `STAGE ${currentStage} WAVE ${currentWave}`;
                 }
 
                 // Draw
@@ -652,7 +490,7 @@
                 if (boss && boss.active) boss.draw(ctx);
 
             } catch (err) {
-                console.error("Game loop error:", err);
+                console.error("Game error:", err);
             }
 
             requestAnimationFrame(gameLoop);
@@ -663,19 +501,18 @@
             document.getElementById('game-ui').style.display = 'block';
             
             canvas = document.getElementById('canvas');
-            ctx = canvas.getContext('2d', { alpha: true });
+            ctx = canvas.getContext('2d');
             
             player = new Player();
             entityManager = new EntityManager();
 
             window.addEventListener('keydown', e => keys[e.key] = true);
-            window.addEventListener('keyup', e => keys[e.key] = false);
+            window.addEventListener('keyup', e => delete keys[e.key]);
             
             canvas.addEventListener('click', e => {
-                if (!dialogueActive && gameRunning && player) {
-                    const r = canvas.getBoundingClientRect();
-                    player.shoot(e.clientX - r.left, e.clientY - r.top);
-                }
+                if (dialogueActive || !gameRunning || !player) return;
+                const r = canvas.getBoundingClientRect();
+                player.shoot(e.clientX - r.left, e.clientY - r.top);
             });
 
             setTimeout(() => {
@@ -687,21 +524,21 @@
                         });
                     });
                 });
-            }, 600);
+            }, 400);
         }
 
         window.onload = () => {
             let p = 0;
             const bar = document.getElementById('progress-bar');
             const int = setInterval(() => {
-                p += 1.8 + Math.random() * 1.2;
+                p += 2.2;
                 if (p > 100) p = 100;
                 bar.style.width = p + '%';
                 if (p >= 100) {
                     clearInterval(int);
-                    setTimeout(startGame, 600);
+                    setTimeout(startGame, 400);
                 }
-            }, 180);
+            }, 160);
         };
     </script>
 </body>
