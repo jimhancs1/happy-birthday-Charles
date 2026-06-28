@@ -2,19 +2,44 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Circuit Defender | Birthday Protocol</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="boot-screen">
-        <h1 id="greeting">HAPPY BIRTHDAY, ENGINEER!</h1>
-        <p>System Initializing...</p>
-        <div class="progress-container"><div id="progress"></div></div>
+    <div id="game-ui">
+        <canvas id="canvas" width="1280" height="720"></canvas>
+        
+        <div id="hud">
+            <div id="health-bar">HEALTH: <span id="health-value">100</span></div>
+            <div id="xp-bar">XP: <span id="xp-value">0</span></div>
+            <h2 id="stage-display">Stage 1: Power Station</h2>
+            <div id="wave-display">Wave <span id="wave-value">1</span></div>
+        </div>
+
+        <div id="dialogue-box" class="hidden">
+            <div id="dialogue-portrait"></div>
+            <p id="dialogue-text"></p>
+            <div id="dialogue-continue">→ PRESS ANY KEY OR CLICK TO CONTINUE</div>
+        </div>
+
+        <div id="upgrade-menu" class="hidden">
+            <h2>CHOOSE UPGRADE</h2>
+            <div id="upgrade-options"></div>
+        </div>
+
+        <div id="game-over" class="hidden">
+            <div class="game-over-content">
+                <h1>GAME OVER</h1>
+                <p id="final-score">Final Score: 0</p>
+                <p id="final-wave">Wave Reached: 1</p>
+                <button id="retry-btn">RETRY MISSION</button>
+                <button id="menu-btn">MAIN MENU</button>
+            </div>
+        </div>
     </div>
-    <canvas id="gameCanvas"></canvas>
-    <div id="ui" style="display:none;">
-        Score: <span id="score">0</span> | HP: <span id="hp">100</span> | Wave: <span id="wave">1</span>
-    </div>
-    <script src="script.js"></script>
+
+    <script src="engine.js"></script>
+    <script src="game.js"></script>
 </body>
 </html>
